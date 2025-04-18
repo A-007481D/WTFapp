@@ -1,6 +1,6 @@
 <template>
   <div class="container">
-    <h1>What the Forecast?!</h1>
+    <h1>Weather App</h1>
 
     <div class="search-box">
       <input
@@ -56,8 +56,9 @@
         </div>
       </div>
 
+      <!-- Hourly Forecast -->
       <div v-if="forecast && forecast.list" class="forecast">
-        <h3>Forecast</h3>
+        <h3>Next Hours</h3>
         <div class="forecast-items">
           <div
               v-for="(item, index) in forecast.list.slice(0, 5)"
@@ -73,6 +74,29 @@
           </div>
         </div>
       </div>
+
+      <!-- 5-Day Forecast -->
+      <div v-if="dailyForecast.length > 0" class="daily-forecast">
+        <h3>5-Day Forecast</h3>
+        <div class="daily-forecast-items">
+          <div
+              v-for="(day, index) in dailyForecast"
+              :key="index"
+              class="daily-forecast-item"
+          >
+            <div class="day">{{ formatDay(day.dt) }}</div>
+            <img
+                :src="`https://openweathermap.org/img/wn/${day.icon}.png`"
+                :alt="day.description"
+            />
+            <div class="temp-range">
+              <span class="max-temp">{{ Math.round(day.maxTemp) }}°</span>
+              <span class="min-temp">{{ Math.round(day.minTemp) }}°</span>
+            </div>
+            <div class="day-description">{{ day.description }}</div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -80,7 +104,6 @@
 <script>
 const API_KEY = '4d3baec517736fbe8eb5f89f8e1c5778\n';
 const BASE_URL = 'https://api.openweathermap.org/data/2.5';
-
 export default {
   name: 'App',
   data() {
@@ -88,6 +111,7 @@ export default {
       city: '',
       weather: null,
       forecast: null,
+      dailyForecast: [],
       loading: false,
       error: ''
     }
@@ -98,6 +122,7 @@ export default {
 
       this.loading = true;
       this.error = '';
+      this.dailyForecast = [];
 
       try {
         //current weather
@@ -121,6 +146,7 @@ export default {
 
         if (forecastResponse.ok) {
           this.forecast = await forecastResponse.json();
+          this.processDailyForecast(this.forecast.list);
         }
       } catch (err) {
         this.error = err.message || 'Failed to fetch weather data';
@@ -131,6 +157,63 @@ export default {
       }
     },
 
+    processDailyForecast(forecastList) {
+      // group forecast by day
+      const dailyData = {};
+
+      forecastList.forEach(item => {
+        const date = new Date(item.dt * 1000);
+        const day = date.toISOString().split('T')[0];
+
+        if (!dailyData[day]) {
+          dailyData[day] = {
+            temps: [],
+            icons: {},
+            descriptions: {},
+            dt: item.dt
+          };
+        }
+
+        dailyData[day].temps.push(item.main.temp);
+        const icon = item.weather[0].icon.replace('n', 'd');
+        const description = item.weather[0].description;
+
+        dailyData[day].icons[icon] = (dailyData[day].icons[icon] || 0) + 1;
+        dailyData[day].descriptions[description] = (dailyData[day].descriptions[description] || 0) + 1;
+      });
+      this.dailyForecast = Object.values(dailyData).map(day => {
+        let maxCount = 0;
+        let mostCommonIcon = '';
+
+        for (const [icon, count] of Object.entries(day.icons)) {
+          if (count > maxCount) {
+            maxCount = count;
+            mostCommonIcon = icon;
+          }
+        }
+
+        maxCount = 0;
+        let mostCommonDescription = '';
+
+        for (const [desc, count] of Object.entries(day.descriptions)) {
+          if (count > maxCount) {
+            maxCount = count;
+            mostCommonDescription = desc;
+          }
+        }
+
+        return {
+          dt: day.dt,
+          minTemp: Math.min(...day.temps),
+          maxTemp: Math.max(...day.temps),
+          icon: mostCommonIcon,
+          description: mostCommonDescription
+        };
+      });
+      this.dailyForecast.sort((a, b) => a.dt - b.dt);
+      this.dailyForecast = this.dailyForecast.slice(0, 5);
+    },
+
     getLocationWeather() {
       if (!navigator.geolocation) {
         this.error = 'Geolocation is not supported by your browser';
@@ -139,13 +222,13 @@ export default {
 
       this.loading = true;
       this.error = '';
+      this.dailyForecast = [];
 
       navigator.geolocation.getCurrentPosition(
           async (position) => {
             try {
               const { latitude, longitude } = position.coords;
 
-              // current weather
               const weatherResponse = await fetch(
                   `${BASE_URL}/weather?lat=${latitude}&lon=${longitude}&units=metric&appid=${API_KEY}`
               );
@@ -162,6 +245,7 @@ export default {
 
               if (forecastResponse.ok) {
                 this.forecast = await forecastResponse.json();
+                this.processDailyForecast(this.forecast.list);
               }
             } catch (err) {
               this.error = err.message || 'Failed to fetch weather data';
@@ -181,6 +265,11 @@ export default {
     formatTime(timestamp) {
       const date = new Date(timestamp * 1000);
       return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    },
+
+    formatDay(timestamp) {
+      const date = new Date(timestamp * 1000);
+      return date.toLocaleDateString([], { weekday: 'long' });
     }
   },
   mounted() {
@@ -213,6 +302,7 @@ body {
   border-radius: 10px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
   margin-top: 30px;
+  margin-bottom: 30px;
 }
 
 h1 {
@@ -307,8 +397,9 @@ button {
   font-weight: bold;
 }
 
-.forecast h3 {
+.forecast h3, .daily-forecast h3 {
   margin-bottom: 10px;
+  margin-top: 20px;
 }
 
 .forecast-items {
@@ -326,5 +417,44 @@ button {
 .forecast-item img {
   width: 50px;
   height: 50px;
+}
+
+.daily-forecast-items {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.daily-forecast-item {
+  display: grid;
+  grid-template-columns: 1fr 50px 1fr 1fr;
+  align-items: center;
+  background-color: #f5f5f5;
+  padding: 10px;
+  border-radius: 4px;
+  text-align: left;
+}
+
+.day {
+  font-weight: bold;
+}
+
+.temp-range {
+  display: flex;
+  flex-direction: column;
+}
+
+.max-temp {
+  font-weight: bold;
+}
+
+.min-temp {
+  color: #666;
+}
+
+.day-description {
+  text-transform: capitalize;
+  color: #666;
+  font-size: 14px;
 }
 </style>
